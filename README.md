@@ -32,6 +32,8 @@ Clone this repo, then run the machine bootstrap once per machine:
 ./scripts/setup-machine.sh
 ```
 
+Rerunning it is safe. Existing MCP servers are now reported as `already configured`, and mismatched ones are updated in place.
+
 Add optional MCP servers when you want external docs:
 
 ```bash
@@ -44,7 +46,17 @@ Bootstrap any target repo:
 ./scripts/bootstrap-project.sh --target /path/to/your/project
 ```
 
-Use `--force` if you want the bootstrap to replace existing generated files instead of skipping them.
+Safer modes:
+
+```bash
+./scripts/bootstrap-project.sh --target /path/to/your/project --dry-run
+./scripts/bootstrap-project.sh --target /path/to/your/project --update-only
+./scripts/bootstrap-project.sh --target /path/to/your/project --force
+```
+
+- `--dry-run` previews writes, updates, and skips without changing files
+- `--update-only` refreshes only existing managed files or managed blocks
+- `--force` replaces existing managed files and refreshes managed blocks
 
 ## Workflow
 
@@ -81,9 +93,17 @@ cd <repo>
 ./scripts/bootstrap-project.sh --target /path/to/project
 ```
 
+## CI
+
+GitHub Actions validation lives in `.github/workflows/validate.yml` and checks:
+
+- shell syntax
+- `SKILL.md` frontmatter validity
+- bootstrap behavior, including `--dry-run` and `--update-only`
+- MCP setup idempotence and mismatch repair
+
 ## Scope
 
 - macOS and Linux are supported directly
 - Windows should use WSL2, which matches the current Codex CLI docs
 - project config stays minimal on purpose; repo-specific behavior belongs in `AGENTS.md` and `.agents/skills/`
-

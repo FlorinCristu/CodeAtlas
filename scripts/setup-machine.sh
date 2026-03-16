@@ -201,27 +201,17 @@ get_mcp_server_json() {
 mcp_server_matches_stdio() {
   local name="$1"
   local command_name="$2"
-  local args_json="$3"
   local current_json
 
   if ! current_json="$(get_mcp_server_json "$name")"; then
     return 1
   fi
 
-  CURRENT_JSON="$current_json" \
-  EXPECTED_COMMAND="$command_name" \
-  EXPECTED_ARGS_JSON="$args_json" \
-  node <<'EOF'
-const data = JSON.parse(process.env.CURRENT_JSON);
-const transport = data.transport || {};
-const expectedArgs = JSON.parse(process.env.EXPECTED_ARGS_JSON);
-const matches =
-  data.enabled === true &&
-  transport.type === "stdio" &&
-  transport.command === process.env.EXPECTED_COMMAND &&
-  JSON.stringify(transport.args || []) === JSON.stringify(expectedArgs);
-process.exit(matches ? 0 : 1);
-EOF
+  printf '%s' "$current_json" | grep -F '"enabled": true' >/dev/null &&
+    printf '%s' "$current_json" | grep -F '"type": "stdio"' >/dev/null &&
+    printf '%s' "$current_json" | grep -F "\"command\": \"$command_name\"" >/dev/null &&
+    printf '%s' "$current_json" | grep -F '"-y"' >/dev/null &&
+    printf '%s' "$current_json" | grep -F '"@upstash/context7-mcp"' >/dev/null
 }
 
 mcp_server_matches_http() {
@@ -233,27 +223,18 @@ mcp_server_matches_http() {
     return 1
   fi
 
-  CURRENT_JSON="$current_json" \
-  EXPECTED_URL="$url" \
-  node <<'EOF'
-const data = JSON.parse(process.env.CURRENT_JSON);
-const transport = data.transport || {};
-const matches =
-  data.enabled === true &&
-  transport.type === "streamable_http" &&
-  transport.url === process.env.EXPECTED_URL;
-process.exit(matches ? 0 : 1);
-EOF
+  printf '%s' "$current_json" | grep -F '"enabled": true' >/dev/null &&
+    printf '%s' "$current_json" | grep -F '"type": "streamable_http"' >/dev/null &&
+    printf '%s' "$current_json" | grep -F "\"url\": \"$url\"" >/dev/null
 }
 
 ensure_mcp_stdio_server() {
   local name="$1"
   local command_name="$2"
-  local args_json="$3"
-  shift 3
+  shift 2
   local add_args=("$@")
 
-  if mcp_server_matches_stdio "$name" "$command_name" "$args_json"; then
+  if mcp_server_matches_stdio "$name" "$command_name"; then
     log_info "MCP server '$name' already configured."
     return
   fi
@@ -295,7 +276,7 @@ configure_mcp_servers() {
   ensure_codex
 
   if [[ "$with_context7" -eq 1 ]]; then
-    ensure_mcp_stdio_server context7 npx '["-y","@upstash/context7-mcp"]' npx -y @upstash/context7-mcp
+    ensure_mcp_stdio_server context7 npx npx -y @upstash/context7-mcp
   fi
 
   if [[ "$with_openai_docs" -eq 1 ]]; then
