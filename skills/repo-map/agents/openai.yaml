@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Map"
+  short_description: "Map repo structure before edits"
+  default_prompt: "Use $repo-map to explain this codebase before making any edits."

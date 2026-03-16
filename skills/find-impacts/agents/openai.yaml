@@ -1,0 +1,4 @@
+interface:
+  display_name: "Find Impacts"
+  short_description: "Trace change impact before edits"
+  default_prompt: "Use $find-impacts to find the impact radius of this change before editing."

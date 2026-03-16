@@ -1,0 +1,90 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml
+          npm install -g @openai/codex@latest
+
+      - name: Check shell syntax
+        run: |
+          bash -n scripts/setup-machine.sh
+          bash -n scripts/bootstrap-project.sh
+          bash -n templates/project/scripts/ai/repo-map.sh
+
+      - name: Validate skills
+        run: |
+          python scripts/validate-skills.py skills/repo-map skills/find-impacts
+
+      - name: Validate bootstrap flow
+        run: |
+          target_dir="$(mktemp -d)"
+          bash scripts/bootstrap-project.sh --target "$target_dir"
+          test -f "$target_dir/.codex/config.toml"
+          test -f "$target_dir/.agents/skills/repo-map/SKILL.md"
+          test -f "$target_dir/.agents/skills/find-impacts/SKILL.md"
+          test -f "$target_dir/scripts/ai/repo-map.sh"
+
+          dry_run_log="$(mktemp)"
+          bash scripts/bootstrap-project.sh --target "$target_dir" --dry-run >"$dry_run_log"
+          grep -q '^would skip ' "$dry_run_log"
+
+          rm "$target_dir/.codex/config.toml"
+          update_log="$(mktemp)"
+          bash scripts/bootstrap-project.sh --target "$target_dir" --update-only >"$update_log"
+          test ! -f "$target_dir/.codex/config.toml"
+          grep -q 'missing and update-only' "$update_log"
+
+      - name: Validate MCP idempotence
+        run: |
+          codex_home="$(mktemp -d)"
+          CODEX_HOME="$codex_home" bash scripts/setup-machine.sh --skip-tools --with-context7 --with-openai-docs
+          first_config="$(cat "$codex_home/config.toml")"
+
+          rerun_log="$(mktemp)"
+          CODEX_HOME="$codex_home" bash scripts/setup-machine.sh --skip-tools --with-context7 --with-openai-docs >"$rerun_log"
+          second_config="$(cat "$codex_home/config.toml")"
+
+          test "$first_config" = "$second_config"
+          grep -q "already configured" "$rerun_log"
+
+          CODEX_HOME="$codex_home" codex mcp remove openaiDeveloperDocs >/dev/null
+          CODEX_HOME="$codex_home" codex mcp add openaiDeveloperDocs --url https://example.com >/dev/null
+
+          update_log="$(mktemp)"
+          CODEX_HOME="$codex_home" bash scripts/setup-machine.sh --skip-tools --with-openai-docs >"$update_log"
+          grep -q "different settings. Updating." "$update_log"
+          json_file="$codex_home/openai-docs.json"
+          CODEX_HOME="$codex_home" codex mcp get openaiDeveloperDocs --json >"$json_file"
+
+          python - "$json_file" <<'EOF'
+          import json
+          import sys
+          from pathlib import Path
+
+          data = json.loads(Path(sys.argv[1]).read_text())
+          assert data["transport"]["type"] == "streamable_http"
+          assert data["transport"]["url"] == "https://developers.openai.com/mcp"
+          EOF
