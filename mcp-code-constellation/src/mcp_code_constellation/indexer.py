@@ -5,6 +5,7 @@ import tree_sitter
 import tree_sitter_python
 import tree_sitter_javascript
 import tree_sitter_typescript
+import tree_sitter_kotlin
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
@@ -31,11 +32,16 @@ class CodeAtlasIndexer:
             ".jsx": tree_sitter.Language(tree_sitter_javascript.language()),
             ".ts": tree_sitter.Language(tree_sitter_typescript.language_typescript()),
             ".tsx": tree_sitter.Language(tree_sitter_typescript.language_tsx()),
+            ".kt": tree_sitter.Language(tree_sitter_kotlin.language()),
+            ".kts": tree_sitter.Language(tree_sitter_kotlin.language()),
         }
         
         self.nodes: Dict[str, CodeNode] = {}
         # Simple string-to-Node mapping to resolve call graph edges later
         self.symbol_map: Dict[str, str] = {}
+        self.files_scanned: int = 0
+        self.files_parsed: int = 0
+        self.nodes_by_extension: Dict[str, int] = {}
         
     def _get_queries(self, ext: str) -> dict:
         """Return language-specific Tree-sitter queries for extraction."""
@@ -55,7 +61,11 @@ class CodeAtlasIndexer:
                 "definitions": """
                     (function_declaration name: (identifier) @name) @def
                     (method_definition name: (property_identifier) @name) @def
+                    (method_signature name: (property_identifier) @name) @def
                     (lexical_declaration (variable_declarator name: (identifier) @name value: (arrow_function))) @def
+                    (lexical_declaration (variable_declarator name: (identifier) @name value: (function))) @def
+                    (assignment_expression left: (identifier) @name right: (arrow_function)) @def
+                    (assignment_expression left: (identifier) @name right: (function)) @def
                     (class_declaration name: (identifier) @name) @def
                 """,
                 "calls": """
@@ -63,9 +73,44 @@ class CodeAtlasIndexer:
                     (call_expression function: (member_expression property: (property_identifier) @call))
                 """
             }
+        elif ext in [".kt", ".kts"]:
+            return {
+                "definitions": """
+                    (function_declaration name: (identifier) @name) @def
+                    (class_declaration name: (identifier) @name) @def
+                """,
+                "calls": """
+                    (call_expression (identifier) @call)
+                    (call_expression (navigation_expression . (identifier) @call))
+                """
+            }
         return {}
+
+    def _is_within_class_like(self, node: tree_sitter.Node) -> bool:
+        class_like_types = {
+            "class_definition",
+            "class_declaration",
+            "object_declaration",
+            "interface_declaration",
+        }
+        parent = node.parent
+        while parent is not None:
+            if parent.type in class_like_types:
+                return True
+            parent = parent.parent
+        return False
+
+    def _classify_definition_type(self, node: tree_sitter.Node) -> str:
+        if node.type in {"class_definition", "class_declaration", "object_declaration", "interface_declaration"}:
+            return "class"
+        if node.type == "method_definition":
+            return "method"
+        if node.type in {"function_definition", "function_declaration"} and self._is_within_class_like(node):
+            return "method"
+        return "function"
         
     def parse_file(self, file_path: Path):
+        self.files_scanned += 1
         ext = file_path.suffix
         if ext not in self.langs:
             return
@@ -84,6 +129,7 @@ class CodeAtlasIndexer:
         queries = self._get_queries(ext)
         if not queries:
             return
+        self.files_parsed += 1
             
         # Extract definitions
         try:
@@ -123,12 +169,13 @@ class CodeAtlasIndexer:
             except Exception:
                 pass
             
-            node_id = f"{file_path}:{func_name}"
+            node_id = f"{file_path}:{def_node.start_byte}:{def_node.end_byte}:{func_name}"
+            node_type = self._classify_definition_type(def_node)
             
             code_node = CodeNode(
                 id=node_id,
                 name=func_name,
-                type="function" if "function" in def_node.type else "class",
+                type=node_type,
                 file_path=str(file_path),
                 start_byte=def_node.start_byte,
                 end_byte=def_node.end_byte,
@@ -138,17 +185,18 @@ class CodeAtlasIndexer:
             
             from dataclasses import asdict
             self.nodes[node_id] = asdict(code_node)
-            self.symbol_map[func_name] = node_id
+            self.symbol_map.setdefault(func_name, node_id)
+            self.nodes_by_extension[ext] = self.nodes_by_extension.get(ext, 0) + 1
             
     def build(self) -> Dict[str, Any]:
         """Walk the directory and parse all supported files."""
-        for root, _, files in os.walk(self.target_dir):
-            if ".git" in root or "node_modules" in root or ".venv" in root:
-                continue
+        ignored_dirs = {".git", "node_modules", ".venv"}
+        for root, dirs, files in os.walk(self.target_dir, topdown=True):
+            # Prune ignored directories early so walk still goes deep everywhere else.
+            dirs[:] = [d for d in dirs if d not in ignored_dirs]
             for file in files:
-                ext = "".join(Path(file).suffixes) # .test.js vs .js
-                if ext == "":
-                    ext = Path(file).suffix
+                # Always use the final extension so names like *.spec.ts are parsed.
+                ext = Path(file).suffix
                 if ext in self.langs:
                     self.parse_file(Path(root) / file)
                 
@@ -160,4 +208,4 @@ if __name__ == "__main__":
     nodes = idx.build()
     print(f"Indexed {len(nodes)} definitions.")
     for n in list(nodes.values())[:3]:
-        print(f"[{n.type}] {n.name} (calls: {n.calls})")
+        print(f"[{n['type']}] {n['name']} (calls: {n['calls']})")

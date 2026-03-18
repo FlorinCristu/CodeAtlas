@@ -98,9 +98,15 @@ def index_target_repo(absolute_path: str) -> str:
     storage.index_nodes(nodes)
     graph = ConstellationGraph(storage.nodes, idx.symbol_map)
     is_indexed = True
-    
+
+    ext_stats = ", ".join(
+        f"{ext}:{count}" for ext, count in sorted(idx.nodes_by_extension.items())
+    ) or "none"
+
     return (
         f"Successfully indexed {len(nodes)} semantic nodes across the repository.\n"
+        f"Files scanned: {idx.files_scanned}, parsed: {idx.files_parsed}\n"
+        f"Nodes by extension: {ext_stats}\n"
         f"Active project: {resolved_path}"
     )
 
