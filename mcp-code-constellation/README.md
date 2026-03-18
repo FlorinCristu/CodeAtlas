@@ -40,7 +40,7 @@ You have access to the Code Constellation MCP Server. This is your primary mecha
 Create a `.cursorrules` file in the root of your project and paste the **Master System Prompt** above into it. Cursor will automatically read this before every generation.
 For the MCP server itself, add it in `Cursor Settings -> Features -> MCP`:
 - Type: `command`
-- Command: `uv run python /absolute/path/to/mcp-code-constellation/src/mcp_code_constellation/server.py`
+- Command: `uv --directory /absolute/path/to/mcp-code-constellation run --with-editable /absolute/path/to/mcp-code-constellation python -m mcp_code_constellation.server`
 
 ### 2. Antigravity / Gemini
 Gemini/Antigravity natively utilizes `mcp_config.json` and `.gemini/GEMINI.md`.
@@ -51,10 +51,7 @@ Gemini/Antigravity natively utilizes `mcp_config.json` and `.gemini/GEMINI.md`.
   "mcpServers": {
     "code-constellation": {
       "command": "uv",
-      "args": ["run", "python", "src/mcp_code_constellation/server.py"],
-      "env": {
-        "PYTHONPATH": "src"
-      },
+      "args": ["run", "--with-editable", ".", "python", "-m", "mcp_code_constellation.server"],
       "directory": "/absolute/path/to/mcp-code-constellation"
     }
   }
@@ -68,8 +65,7 @@ Add the server to your `claude_desktop_config.json` (usually located at `~/Libra
   "mcpServers": {
     "code-constellation": {
       "command": "uv",
-      "args": ["run", "python", "/absolute/path/to/mcp-code-constellation/src/mcp_code_constellation/server.py"],
-      "env": { "PYTHONPATH": "src" }
+      "args": ["run", "--with-editable", "/absolute/path/to/mcp-code-constellation", "python", "-m", "mcp_code_constellation.server"]
     }
   }
 }
@@ -84,11 +80,12 @@ Serena and Codex use standard MCP entries in `config.toml`.
 command = "uv"
 args = [
   "--directory", "/absolute/path/to/mcp-code-constellation",
-  "run", "python", "src/mcp_code_constellation/server.py"
+  "run", "--with-editable", ".", "python", "-m", "mcp_code_constellation.server"
 ]
 
 startup_timeout_sec = 20
 tool_timeout_sec = 120
 ```
+This project uses a `src/` layout, so running `python src/mcp_code_constellation/server.py` will fail with `ModuleNotFoundError`. Use the editable-package command above so `uv` exposes `mcp_code_constellation` correctly on `sys.path`.
 2. Paste the **Master System Prompt** directly into your Serena agent instructions, Codex `AGENTS.md`, or another system-instructions file that your client reads automatically.
 3. Restart the client after saving `config.toml` so it reloads the MCP server list.
