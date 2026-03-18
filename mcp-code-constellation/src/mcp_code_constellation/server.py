@@ -1,22 +1,32 @@
-import anyio
+from pathlib import Path
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel, Field
-from pathlib import os
 import threading
 import webbrowser
 from typing import Optional
-from mcp.server.fastmcp import FastMCP
 
 # Import our custom logic
 from mcp_code_constellation.indexer import CodeAtlasIndexer
-from mcp_code_constellation.storage import VectorStore
+from mcp_code_constellation.storage import (
+    VectorStore,
+    project_cache_dir,
+    write_active_project,
+    read_active_project,
+)
 from mcp_code_constellation.graph import ConstellationGraph
 from mcp_code_constellation import web_visualizer
 
 mcp = FastMCP("code_constellation")
+CACHE_ROOT = ".constellation"
 
-# Global instances (init on startup if index exists)
-storage = VectorStore()
+# Global instances (init on startup if active project metadata exists)
+active_project_path: Optional[str] = None
+active_cache_dir: Optional[str] = None
+_active_meta = read_active_project(CACHE_ROOT)
+if _active_meta:
+    active_project_path = _active_meta["project_path"]
+    active_cache_dir = _active_meta["cache_dir"]
+
+storage = VectorStore(cache_dir=active_cache_dir or CACHE_ROOT)
 graph: Optional[ConstellationGraph] = None
 is_indexed = storage.load()
 
@@ -26,6 +36,27 @@ if is_indexed:
     # Let's rebuild symbol map quickly from loaded nodes
     sym_map = {n["name"]: k for k, n in storage.nodes.items()}
     graph = ConstellationGraph(storage.nodes, sym_map)
+
+
+def _activate_project(project_path: str) -> None:
+    global storage, graph, is_indexed, active_project_path, active_cache_dir
+
+    resolved_path = str(Path(project_path).resolve())
+    cache_dir = project_cache_dir(CACHE_ROOT, resolved_path)
+    store = VectorStore(cache_dir=str(cache_dir))
+    loaded = store.load()
+
+    storage = store
+    is_indexed = loaded
+    active_project_path = resolved_path
+    active_cache_dir = str(cache_dir.resolve())
+    write_active_project(CACHE_ROOT, resolved_path, active_cache_dir)
+
+    if loaded:
+        sym_map = {n["name"]: k for k, n in storage.nodes.items()}
+        graph = ConstellationGraph(storage.nodes, sym_map)
+    else:
+        graph = None
 
 # ---- Start Background Visualizer & Open Browser ----
 def start_web_server():
@@ -52,18 +83,54 @@ def index_target_repo(absolute_path: str) -> str:
     CRITICAL INSTRUCTION: Agents MUST call this tool every time they finish an implementation or modify the codebase!
     """
     global graph, is_indexed
-    
-    idx = CodeAtlasIndexer(absolute_path)
+
+    resolved_path = str(Path(absolute_path).resolve())
+    if not Path(resolved_path).is_dir():
+        return f"Path is not a directory: {resolved_path}"
+
+    _activate_project(resolved_path)
+    idx = CodeAtlasIndexer(resolved_path)
     nodes = idx.build()
     
     if not nodes:
-        return f"Found no parsable functions or classes in {absolute_path}."
+        return f"Found no parsable functions or classes in {resolved_path}."
         
     storage.index_nodes(nodes)
     graph = ConstellationGraph(storage.nodes, idx.symbol_map)
     is_indexed = True
     
-    return f"Successfully indexed {len(nodes)} semantic nodes across the repository."
+    return (
+        f"Successfully indexed {len(nodes)} semantic nodes across the repository.\n"
+        f"Active project: {resolved_path}"
+    )
+
+
+@mcp.tool()
+def switch_active_project(absolute_path: str) -> str:
+    """
+    Switch active project context to an already indexed repository.
+    """
+    resolved_path = str(Path(absolute_path).resolve())
+    if not Path(resolved_path).is_dir():
+        return f"Path is not a directory: {resolved_path}"
+
+    _activate_project(resolved_path)
+    if not is_indexed:
+        return (
+            "No cached index found for this project yet.\n"
+            f"Run index_target_repo('{resolved_path}') first."
+        )
+    return f"Active project switched to: {resolved_path}"
+
+
+@mcp.tool()
+def get_active_project() -> str:
+    """
+    Return current active project context used for search and graph tools.
+    """
+    if not active_project_path:
+        return "No active project is set yet. Run index_target_repo first."
+    return f"Active project: {active_project_path}"
 
 @mcp.tool()
 def open_visualizer() -> str:
@@ -95,6 +162,8 @@ def search_flow(query: str, depth: int = 3) -> str:
     
     # 3. Format as a comprehensive summary
     markdown = f"## 🌌 Flow Constellation for: '{query}'\n"
+    if active_project_path:
+        markdown += f"**Project:** `{active_project_path}`\n"
     markdown += f"**Entry Point:** `{entry_node['name']}` (Score: {results[0]['score']:.2f})\n"
     markdown += f"**Total Flow Context Nodes:** {len(flow_nodes)}\n\n"
     
@@ -125,6 +194,8 @@ def get_function_constellation(symbol_name: str, depth: int = 1) -> str:
     const_data = graph.get_constellation(target_id, depth)
     
     markdown = f"## 🌌 Constellation for Symbol `{symbol_name}`\n\n"
+    if active_project_path:
+        markdown += f"**Project:** `{active_project_path}`\n\n"
     
     parents = const_data["parents"]
     children = const_data["children"]

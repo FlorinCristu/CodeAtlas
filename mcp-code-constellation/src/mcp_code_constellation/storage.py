@@ -1,8 +1,46 @@
 import os
+import json
+import hashlib
 import chromadb
 from chromadb.utils import embedding_functions
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+
+ACTIVE_PROJECT_FILENAME = "active_project.json"
+
+
+def project_key(project_path: str) -> str:
+    return hashlib.sha1(str(Path(project_path).resolve()).encode("utf-8")).hexdigest()[:16]
+
+
+def project_cache_dir(cache_root: str, project_path: str) -> Path:
+    return Path(cache_root) / "projects" / project_key(project_path)
+
+
+def write_active_project(cache_root: str, project_path: str, cache_dir: str) -> None:
+    root = Path(cache_root)
+    root.mkdir(exist_ok=True, parents=True)
+    payload = {
+        "project_path": str(Path(project_path).resolve()),
+        "project_key": project_key(project_path),
+        "cache_dir": str(Path(cache_dir).resolve()),
+    }
+    (root / ACTIVE_PROJECT_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def read_active_project(cache_root: str) -> Optional[Dict[str, str]]:
+    meta_file = Path(cache_root) / ACTIVE_PROJECT_FILENAME
+    if not meta_file.exists():
+        return None
+    try:
+        data = json.loads(meta_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not data.get("project_path") or not data.get("cache_dir"):
+        return None
+    return data
 
 class VectorStore:
     def __init__(self, cache_dir: str = ".constellation"):

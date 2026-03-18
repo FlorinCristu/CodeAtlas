@@ -12,9 +12,16 @@ This server provides precise tools to LLMs so they can navigate code structurall
 
 ## Server Tools
 - `index_target_repo(absolute_path)`: Scans the repo, builds the DB, and live-updates the visualizer.
+- `switch_active_project(absolute_path)`: Switches context to a previously indexed repo without re-indexing.
+- `get_active_project()`: Returns the currently active project path used by search and graph tools.
 - `search_flow(query)`: Semantic search that returns full multi-file execution paths.
 - `get_function_constellation(symbol)`: Returns immediate upstream/downstream callers.
 - `open_visualizer()`: Manually forces the browser visualizer to pop open.
+
+Multi-project behavior:
+- Indexes are stored per project under `.constellation/projects/<project-hash>`.
+- The active project is tracked in `.constellation/active_project.json`.
+- The visualizer header shows the active project path from that metadata.
 
 ---
 
@@ -87,5 +94,23 @@ startup_timeout_sec = 20
 tool_timeout_sec = 120
 ```
 This project uses a `src/` layout, so running `python src/mcp_code_constellation/server.py` will fail with `ModuleNotFoundError`. Use the editable-package command above so `uv` exposes `mcp_code_constellation` correctly on `sys.path`.
-2. Paste the **Master System Prompt** directly into your Serena agent instructions, Codex `AGENTS.md`, or another system-instructions file that your client reads automatically.
-3. Restart the client after saving `config.toml` so it reloads the MCP server list.
+2. Add or extend your `system_prompt` in the same `config.toml` so the agent actually uses the MCP tools during planning and edits.
+```toml
+system_prompt = """
+Use Serena for navigation and editing.
+
+At the beginning of every session:
+1. Call serena.activate_project
+2. Call serena.check_onboarding_performed
+3. Call serena.initial_instructions
+
+Prefer Serena symbol-based navigation tools (find_symbol, find_referencing_symbols, get_symbols_overview)
+instead of reading entire files unless necessary.
+
+Code Constellation protocol:
+1. Before planning or code edits, call @mcp:code-constellation:search_flow for the feature area, or get_function_constellation for known symbols.
+2. Use Code Constellation to map cross-file dependencies before broad refactors.
+3. After file modifications, call @mcp:code-constellation:index_target_repo with the repository absolute path to refresh semantic index and graph context.
+"""
+```
+3. Restart the client after saving `config.toml` so it reloads MCP servers and prompt changes.

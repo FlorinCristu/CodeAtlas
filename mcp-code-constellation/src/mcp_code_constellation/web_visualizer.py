@@ -1,17 +1,18 @@
 import json
-import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 import sys
 
 # Add src to path
 sys.path.insert(0, str(Path("src").resolve()))
-from mcp_code_constellation.storage import VectorStore
+from mcp_code_constellation.storage import VectorStore, read_active_project
 
 PORT = 8080
+CACHE_ROOT = ".constellation"
 
 class ConstellationHandler(BaseHTTPRequestHandler):
     store = None
+    store_cache_dir = None
     
     def do_GET(self):
         if self.path == "/api/graph":
@@ -20,8 +21,16 @@ class ConstellationHandler(BaseHTTPRequestHandler):
             self._serve_index()
             
     def _serve_graph_api(self):
-        if ConstellationHandler.store is None:
-            ConstellationHandler.store = VectorStore(cache_dir=".constellation")
+        active_meta = read_active_project(CACHE_ROOT)
+        active_project = active_meta["project_path"] if active_meta else None
+        active_cache_dir = active_meta["cache_dir"] if active_meta else CACHE_ROOT
+
+        if (
+            ConstellationHandler.store is None
+            or ConstellationHandler.store_cache_dir != active_cache_dir
+        ):
+            ConstellationHandler.store = VectorStore(cache_dir=active_cache_dir)
+            ConstellationHandler.store_cache_dir = active_cache_dir
         
         try:
             # Refresh collection reference locally because the Indexer completely deletes and recreates collections
@@ -60,7 +69,11 @@ class ConstellationHandler(BaseHTTPRequestHandler):
                         "arrows": "to"
                     })
                     
-        payload = {"nodes": vis_nodes, "edges": vis_edges}
+        payload = {
+            "nodes": vis_nodes,
+            "edges": vis_edges,
+            "project_path": active_project
+        }
         
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -97,6 +110,22 @@ class ConstellationHandler(BaseHTTPRequestHandler):
       flex-shrink: 0;
     }
     h1 { margin: 0; font-size: 1.5rem; color: #63b3ed; }
+    #meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.25rem;
+      color: #d1d5db;
+    }
+    #project-path {
+      font-family: 'SFMono-Regular', Menlo, monospace;
+      font-size: 0.85rem;
+      color: #93c5fd;
+      max-width: 60vw;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     #mynetwork {
       flex: 1;
       width: 100%;
@@ -109,7 +138,10 @@ class ConstellationHandler(BaseHTTPRequestHandler):
 <body>
   <header>
     <h1>🌌 Code Constellation Visualizer</h1>
-    <div id="stats">Loading graph data...</div>
+    <div id="meta">
+      <div id="stats">Loading graph data...</div>
+      <div id="project-path">Project: (none)</div>
+    </div>
   </header>
   <div id="mynetwork"></div>
 
@@ -123,6 +155,9 @@ class ConstellationHandler(BaseHTTPRequestHandler):
       fetch('/api/graph')
         .then(r => r.json())
         .then(data => {
+          const projectPath = data.project_path || '(none)';
+          document.getElementById('project-path').innerText = `Project: ${projectPath}`;
+
           // Only re-render if the node count fundamentally changes to avoid physics thrashing
           if (data.nodes.length !== currentCount) {
             currentCount = data.nodes.length;
@@ -172,6 +207,7 @@ class ConstellationHandler(BaseHTTPRequestHandler):
         })
         .catch(e => {
           document.getElementById('stats').innerText = "Disconnected. Retrying...";
+          document.getElementById('project-path').innerText = "Project: (unknown)";
         });
     }
 
