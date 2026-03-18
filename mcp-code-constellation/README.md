@@ -45,7 +45,7 @@ For the MCP server itself, add it in `Cursor Settings -> Features -> MCP`:
 ### 2. Antigravity / Gemini
 Gemini/Antigravity natively utilizes `mcp_config.json` and `.gemini/GEMINI.md`.
 1. Paste the **Master System Prompt** into your `.gemini/GEMINI.md` file.
-2. Add the server to `/Users/florin/.gemini/antigravity/mcp_config.json`:
+2. Add the server to `~/.gemini/antigravity/mcp_config.json`:
 ```json
 {
   "mcpServers": {
@@ -55,7 +55,7 @@ Gemini/Antigravity natively utilizes `mcp_config.json` and `.gemini/GEMINI.md`.
       "env": {
         "PYTHONPATH": "src"
       },
-      "directory": "/Users/florin/projects/CodeAtlas/mcp-code-constellation"
+      "directory": "/absolute/path/to/mcp-code-constellation"
     }
   }
 }
@@ -68,7 +68,7 @@ Add the server to your `claude_desktop_config.json` (usually located at `~/Libra
   "mcpServers": {
     "code-constellation": {
       "command": "uv",
-      "args": ["run", "python", "/Users/florin/projects/CodeAtlas/mcp-code-constellation/src/mcp_code_constellation/server.py"],
+      "args": ["run", "python", "/absolute/path/to/mcp-code-constellation/src/mcp_code_constellation/server.py"],
       "env": { "PYTHONPATH": "src" }
     }
   }
@@ -76,7 +76,19 @@ Add the server to your `claude_desktop_config.json` (usually located at `~/Libra
 ```
 *Note: You can paste the Master System Prompt into Claude's "Project Knowledge" panel if using Claude Projects.*
 
-### 4. Serena / Codex
-Serena uses standard standard MCP configurations and custom instructions.
-1. Add the MCP config block into Serena's server settings identically to the Antigravity configuration above.
-2. Paste the **Master System Prompt** directly into your Serena Agent's "Custom Instructions" or System constraints!
+### 4. Serena / Codex (`config.toml`)
+Serena and Codex use standard MCP entries in `config.toml`.
+1. Add the server to `~/.codex/config.toml` for a global setup, or to `.codex/config.toml` inside a specific repo for a project-scoped setup:
+```toml
+[mcp_servers.code-constellation]
+command = "uv"
+args = [
+  "--directory", "/absolute/path/to/mcp-code-constellation",
+  "run", "python", "src/mcp_code_constellation/server.py"
+]
+
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+```
+2. Paste the **Master System Prompt** directly into your Serena agent instructions, Codex `AGENTS.md`, or another system-instructions file that your client reads automatically.
+3. Restart the client after saving `config.toml` so it reloads the MCP server list.
